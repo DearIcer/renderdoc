@@ -1358,10 +1358,10 @@ rdcstr RenderDoc::GetOverlayText(RDCDriver driver, DeviceOwnedWindow devWnd, uin
   // Capturing D3D11.  Window 1 active.
   // F11 to cycle. OpenGL window 2.
 
-  rdcstr overlayText = ToStr(activeDriver) + ".";
+  rdcstr overlayText = ToStr(activeDriver) + " (minhook).";
 
   // pad this so it's the same length regardless of API length
-  while(overlayText.length() < 8)
+  while(overlayText.length() < 16)
     overlayText.push_back(' ');
 
   overlayText = "Capturing " + overlayText;

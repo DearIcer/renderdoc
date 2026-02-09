@@ -37,14 +37,42 @@
 #include "os/os_specific.h"
 #include "strings/string_utils.h"
 
+// Include MinHook header
+#include "3rdparty/minhook/include/MinHook.h"
+
 #define VERBOSE_DEBUG_HOOK OPTION_OFF
 
 // map from address of IAT entry, to original contents
 std::map<void **, void *> s_InstalledHooks;
 Threading::CriticalSection installedLock;
 
+// MinHook has been initialized
+static bool s_MinHookInitialized = false;
+// Using MinHook instead of IAT patching
+static bool s_UseMinHook = true;
+
 bool ApplyHook(FunctionHook &hook, void **IATentry, bool &already)
 {
+  if(s_UseMinHook)
+  {
+    // With MinHook, we don't patch IAT directly
+    // MinHook handles the hooking internally
+    if(IATentry && *IATentry == hook.hook)
+    {
+      already = true;
+      return true;
+    }
+    
+    // We still need to track what we've hooked for proper cleanup
+    {
+      SCOPED_LOCK(installedLock);
+      if(IATentry && s_InstalledHooks.find(IATentry) == s_InstalledHooks.end())
+        s_InstalledHooks[IATentry] = *IATentry;
+    }
+    
+    return true;
+  }
+  
   DWORD oldProtection = PAGE_EXECUTE;
 
   if(*IATentry == hook.hook)
@@ -877,6 +905,21 @@ static void InitHookData()
   if(!s_HookData)
   {
     s_HookData = new CachedHookData;
+    
+    // Initialize MinHook
+    if(!s_MinHookInitialized)
+    {
+      MH_STATUS status = MH_Initialize();
+      if(status == MH_OK)
+      {
+        s_MinHookInitialized = true;
+        RDCLOG("Initialized MinHook");
+      }
+      else
+      {
+        RDCERR("Failed to initialize MinHook (status: %d)", status);
+      }
+    }
 
     RDCASSERT(s_HookData->DllHooks.empty());
     s_HookData->DllHooks["kernel32.dll"].FunctionHooks.push_back(
@@ -925,6 +968,33 @@ void LibraryHooks::RegisterFunctionHook(const char *libraryName, const FunctionH
       return;
     }
   }
+  
+  // If using MinHook, create the hook now
+  if(s_UseMinHook && s_MinHookInitialized)
+  {
+    HMODULE hModule = GetModuleHandleA(libraryName);
+    if(hModule)
+    {
+      FARPROC targetFunc = GetProcAddress(hModule, hook.function.c_str());
+      if(targetFunc && hook.hook)
+      {
+        MH_STATUS status = MH_CreateHook((LPVOID)targetFunc, hook.hook, hook.orig);
+        if(status == MH_OK)
+        {
+          status = MH_EnableHook((LPVOID)targetFunc);
+          if(status != MH_OK)
+          {
+            RDCERR("Failed to enable MinHook for %s!%s: %d", libraryName, hook.function.c_str(), status);
+          }
+        }
+        else
+        {
+          RDCERR("Failed to create MinHook for %s!%s: %d", libraryName, hook.function.c_str(), status);
+        }
+      }
+    }
+  }
+  
   s_HookData->DllHooks[strlower(rdcstr(libraryName))].FunctionHooks.push_back(hook);
 }
 
@@ -987,6 +1057,25 @@ void LibraryHooks::ReplayInitialise()
 void LibraryHooks::RemoveHooks()
 {
   LibraryHooks::RemoveHookCallbacks();
+  
+  // If using MinHook, uninitialize it
+  if(s_UseMinHook && s_MinHookInitialized)
+  {
+    // Disable all hooks first
+    MH_STATUS status = MH_DisableHook(MH_ALL_HOOKS);
+    if(status != MH_OK)
+    {
+      RDCERR("Failed to disable all MinHook hooks: %d", status);
+    }
+    
+    status = MH_Uninitialize();
+    if(status != MH_OK)
+    {
+      RDCERR("Failed to uninitialize MinHook: %d", status);
+    }
+    s_MinHookInitialized = false;
+    return;
+  }
 
   for(auto it = s_InstalledHooks.begin(); it != s_InstalledHooks.end(); ++it)
   {
