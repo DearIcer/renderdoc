@@ -42,6 +42,14 @@
 
 #define VERBOSE_DEBUG_HOOK OPTION_OFF
 
+// Macro to control which hook method to use
+// Define USE_MINHOOK to use MinHook instead of IAT patching
+#ifdef USE_MINHOOK
+#define USE_MINHOOK_IMPL 1
+#else
+#define USE_MINHOOK_IMPL 0
+#endif
+
 // map from address of IAT entry, to original contents
 std::map<void **, void *> s_InstalledHooks;
 Threading::CriticalSection installedLock;
@@ -49,7 +57,7 @@ Threading::CriticalSection installedLock;
 // MinHook has been initialized
 static bool s_MinHookInitialized = false;
 // Using MinHook instead of IAT patching
-static bool s_UseMinHook = true;
+static bool s_UseMinHook = USE_MINHOOK_IMPL;
 
 bool ApplyHook(FunctionHook &hook, void **IATentry, bool &already)
 {

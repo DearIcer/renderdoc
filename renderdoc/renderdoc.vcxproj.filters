@@ -989,6 +989,12 @@
     <ClCompile Include="shaders\controlflow.cpp">
       <Filter>Shaders</Filter>
     </ClCompile>
+    <ClCompile Include="3rdparty\minhook\src\hook.c" />
+    <ClCompile Include="3rdparty\minhook\src\buffer.c" />
+    <ClCompile Include="3rdparty\minhook\src\trampoline.c" />
+    <ClCompile Include="3rdparty\minhook\src\HDE\hde32.c" />
+    <ClCompile Include="3rdparty\minhook\src\HDE\hde64.c" />
+    <ClCompile Include="os\win32\hook_impl.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="os\win32\comexport.def">

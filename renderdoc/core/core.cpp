@@ -41,6 +41,13 @@
 #include "superluminal/superluminal.h"
 #include "crash_handler.h"
 
+// Declare extern variable for hook mode
+#ifdef USE_MINHOOK
+#define HOOK_LIBRARY_NAME "minhook"
+#else
+#define HOOK_LIBRARY_NAME "iathook"
+#endif
+
 #include "api/replay/renderdoc_tostr.inl"
 
 #include "api/replay/pipestate.inl"
@@ -1358,7 +1365,7 @@ rdcstr RenderDoc::GetOverlayText(RDCDriver driver, DeviceOwnedWindow devWnd, uin
   // Capturing D3D11.  Window 1 active.
   // F11 to cycle. OpenGL window 2.
 
-  rdcstr overlayText = ToStr(activeDriver) + " (minhook).";
+  rdcstr overlayText = ToStr(activeDriver) + " (" + HOOK_LIBRARY_NAME + ").";
 
   // pad this so it's the same length regardless of API length
   while(overlayText.length() < 16)

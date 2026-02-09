@@ -542,7 +542,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles>
       </ForcedIncludeFiles>
-      <DisableSpecificWarnings>4201</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4201;4244</DisableSpecificWarnings>
     </ClCompile>
     <ClCompile Include="3rdparty\minhook\src\HDE\hde32.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
