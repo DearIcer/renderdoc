@@ -30,7 +30,8 @@
 #include "3rdparty/minhook/include/MinHook.h"
 #endif
 
-namespace HookImpl {
+namespace HookImpl
+{
 
 struct HookContext
 {
