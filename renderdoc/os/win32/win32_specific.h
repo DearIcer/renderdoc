@@ -66,16 +66,6 @@ DLLFileVersion GetDLLVersion(const rdcstr &path);
 DLLFileVersion GetDLLVersion(HMODULE mod);
 };
 
-namespace RuntimeAttach
-{
-rdcarray<ProcessInfo> EnumerateProcesses();
-rdcarray<ProcessInfo> EnumerateProcessesWithGraphicsAPI();
-rdcpair<RDResult, uint32_t> AttachToProcess(uint32_t pid, const rdcstr &capturefile,
-                                              const CaptureOptions &opts);
-bool IsAttached(uint32_t pid);
-void DetachFromProcess(uint32_t pid);
-};
-
 namespace Threading
 {
 typedef CriticalSectionTemplate<CRITICAL_SECTION> CriticalSection;

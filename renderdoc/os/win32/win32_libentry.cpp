@@ -38,6 +38,8 @@ static BOOL add_hooks()
 
   rdcstr f = get_basename(strlower(StringFormat::Wide2UTF8(curFile)));
 
+  // bail immediately if we're in a system process. We don't want to hook, log, anything -
+  // this instance is being used for a shell extension.
   if(f == "dllhost.exe" || f == "explorer.exe")
   {
 #if ENABLED(RDOC_RELEASE)
@@ -47,6 +49,7 @@ static BOOL add_hooks()
     return TRUE;
   }
 
+  // search for an exported symbol with this name, typically renderdoc__replay__marker
   if(LibraryHooks::Detect(STRINGIZE(RDOC_BASE_NAME) "__replay__marker"))
   {
     RDCDEBUG("Not creating hooks - in replay app");
@@ -67,17 +70,6 @@ static BOOL add_hooks()
   LibraryHooks::RegisterHooks();
 
   return TRUE;
-}
-
-extern "C" __declspec(dllexport) void __cdecl INTERNAL_InitializeRuntimeHooks()
-{
-  RDCLOG("Initializing runtime hooks");
-
-  RenderDoc::Inst().Initialise();
-
-  LibraryHooks::RegisterHooks();
-
-  RDCLOG("Runtime hooks initialized successfully");
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserved)

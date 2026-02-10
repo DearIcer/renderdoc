@@ -58,8 +58,7 @@ unsigned int hde64_disasm(const void *code, hde64s *hs)
 
     if ((c & 0xf0) == 0x40) {
         hs->flags |= F_PREFIX_REX;
-        hs->rex_w = (c & 0xf) >> 3;
-        if ((*p & 0xf8) == 0xb8)
+        if ((hs->rex_w = (c & 0xf) >> 3) && (*p & 0xf8) == 0xb8)
             op64++;
         hs->rex_r = (c & 7) >> 2;
         hs->rex_x = (c & 3) >> 1;
@@ -70,8 +69,7 @@ unsigned int hde64_disasm(const void *code, hde64s *hs)
         }
     }
 
-    hs->opcode = c;
-    if (c == 0x0f) {
+    if ((hs->opcode = c) == 0x0f) {
         hs->opcode2 = c = *p++;
         ht += DELTA_OPCODES;
     } else if (c >= 0xa0 && c <= 0xa3) {
