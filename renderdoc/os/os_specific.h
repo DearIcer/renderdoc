@@ -90,6 +90,25 @@ uint32_t GetCurrentPID();
 void Shutdown();
 };
 
+namespace RuntimeAttach
+{
+struct ProcessInfo
+{
+  uint32_t pid;
+  rdcstr name;
+  rdcstr path;
+  bool is64Bit;
+  bool isSystemProcess;
+};
+
+rdcarray<ProcessInfo> EnumerateProcesses();
+rdcarray<ProcessInfo> EnumerateProcessesWithGraphicsAPI();
+rdcpair<RDResult, uint32_t> AttachToProcess(uint32_t pid, const rdcstr &capturefile,
+                                              const CaptureOptions &opts);
+bool IsAttached(uint32_t pid);
+void DetachFromProcess(uint32_t pid);
+};
+
 namespace Timing
 {
 double GetTickFrequency();
