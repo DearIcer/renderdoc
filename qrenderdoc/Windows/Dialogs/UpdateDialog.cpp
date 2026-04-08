@@ -125,8 +125,8 @@ void UpdateDialog::on_close_clicked()
 void UpdateDialog::on_update_clicked()
 {
   QMessageBox::StandardButton res =
-      RDDialog::question(this, tr("RenderDoc Update"),
-                         tr("This will close RenderDoc immediately - if you have any "
+      RDDialog::question(this, tr("GraphHelper Update"),
+                         tr("This will close GraphHelper immediately - if you have any "
                             "unsaved work, save it first!\n"
                             "Continue?"),
                          QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel);
@@ -168,8 +168,8 @@ void UpdateDialog::on_update_clicked()
     if(running > 0)
     {
       RDDialog::critical(
-          this, tr("RenderDoc in use"),
-          tr("RenderDoc is currently capturing, cannot update until the program%1 closed:\n\n")
+          this, tr("GraphHelper in use"),
+          tr("GraphHelper is currently capturing, cannot update until the program%1 closed:\n\n")
                   .arg(running > 1 ? lit("s are") : lit(" is")) +
               runningPrograms);
       return;
@@ -229,8 +229,8 @@ void UpdateDialog::on_update_clicked()
 
       QDir dir(QDir::tempPath());
 
-      dir.mkdir(lit("RenderDocUpdate"));
-      dir.cd(lit("RenderDocUpdate"));
+      dir.mkdir(lit("GraphHelperUpdate"));
+      dir.cd(lit("GraphHelperUpdate"));
 
       QString path = dir.absoluteFilePath(lit("update.zip"));
 
@@ -255,8 +255,8 @@ void UpdateDialog::on_update_clicked()
 
       bool success = true;
 
-      QString dll = lit("renderdoc.dll");
-      QString cmd = lit("renderdoccmd.exe");
+      QString dll = lit("rdhelper.dll");
+      QString cmd = lit("rdhelpercmd.exe");
 
       QFile::remove(dir.absoluteFilePath(dll));
       QFile::remove(dir.absoluteFilePath(cmd));

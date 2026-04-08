@@ -401,12 +401,12 @@ void Init_1_7_0()
   api.SetCommandAnnotation = &SetCommandAnnotation;
 }
 
-extern "C" RENDERDOC_API int RENDERDOC_CC RENDERDOC_GetAPI(RENDERDOC_Version version,
+extern "C" RENDERDOC_API int RENDERDOC_CC GRAPHHELPER_GetAPI(RENDERDOC_Version version,
                                                            void **outAPIPointers)
 {
   if(outAPIPointers == NULL)
   {
-    RDCERR("Invalid call to RENDERDOC_GetAPI with NULL outAPIPointers");
+    RDCERR("Invalid call to GRAPHHELPER_GetAPI with NULL outAPIPointers");
     return 0;
   }
 

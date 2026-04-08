@@ -21,8 +21,8 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{61157930-78C3-4355-8B49-4CC91B98F17B}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
-    <RootNamespace>qrenderdoc_module</RootNamespace>
-    <ProjectName>qrenderdoc_module</ProjectName>
+    <RootNamespace>qgraphhelper_module</RootNamespace>
+    <ProjectName>qgraphhelper_module</ProjectName>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(SolutionDir)\util\WindowsSDKTarget.props" />

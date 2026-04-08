@@ -601,7 +601,7 @@ public:
       return 1;
     }
 
-    HANDLE readyEvent = CreateEventA(NULL, TRUE, FALSE, "RENDERDOC_CRASHHANDLE");
+    HANDLE readyEvent = CreateEventA(NULL, TRUE, FALSE, "GRAPHHELPER_CRASHHANDLE");
 
     if(readyEvent != NULL)
     {
@@ -815,12 +815,12 @@ public:
 
     wchar_t rdocpath[1024];
 
-    // fetch path to our matching renderdoc.dll
-    HMODULE rdoc = GetModuleHandleA("renderdoc.dll");
+    // fetch path to our matching rdhelper.dll
+    HMODULE rdoc = GetModuleHandleA("rdhelper.dll");
 
     if(rdoc == NULL)
     {
-      std::cerr << "globalhook couldn't find renderdoc.dll!" << std::endl;
+      std::cerr << "globalhook couldn't find rdhelper.dll!" << std::endl;
       return 1;
     }
 
@@ -930,7 +930,7 @@ int main(int, char *)
   wc.hCursor = LoadCursor(NULL, IDC_ARROW);
   wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
   wc.lpszMenuName = NULL;
-  wc.lpszClassName = L"renderdoccmd";
+  wc.lpszClassName = L"rdcmd";
   wc.hIconSm = LoadIcon(NULL, MAKEINTRESOURCE(IDI_ICON));
 
   if(!RegisterClassEx(&wc))

@@ -718,8 +718,8 @@ void MainWindow::OnCaptureTrigger(const QString &exe, const QString &workingDir,
   LambdaThread *th = new LambdaThread([this, exe, workingDir, cmdLine, env, opts, callback]() {
     if(isUnshareableDeviceInUse())
     {
-      RDDialog::warning(this, tr("RenderDoc is already capturing an app on this device"),
-                        tr("A running app on this device is already being captured with RenderDoc. "
+      RDDialog::warning(this, tr("GraphHelper is already capturing an app on this device"),
+                        tr("A running app on this device is already being captured with GraphHelper. "
                            "First please close the app then try to launch again."),
                         QMessageBox::Ok);
       return;
@@ -1212,7 +1212,7 @@ void MainWindow::SetTitle(const QString &filename)
   if(m_Ctx.Replay().CurrentRemote().IsValid())
     prefix += tr("Remote: %1 - ").arg(m_Ctx.Replay().CurrentRemote().Name());
 
-  QString text = prefix + lit("RenderDoc ");
+  QString text = prefix + lit("GraphHelper ");
 
   if(RENDERDOC_STABLE_BUILD)
     text += lit(FULL_VERSION_STRING);
@@ -3085,7 +3085,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
   if(RENDERDOC_IsGlobalHookActive())
   {
     RDDialog::critical(this, tr("Global hook active"),
-                       tr("Cannot close RenderDoc while global hook is active."));
+                       tr("Cannot close GraphHelper while global hook is active."));
     event->ignore();
     return;
   }
@@ -3315,11 +3315,11 @@ void MainWindow::showLaunchError(ResultDetails result)
           );
       break;
     default:
-      message = tr("Error encountered launching RenderDoc remote server: %1.").arg(result.Message());
+      message = tr("Error encountered launching GraphHelper remote server: %1.").arg(result.Message());
       break;
   }
   GUIInvoke::call(this, [this, message]() {
-    RDDialog::warning(this, tr("Problems launching RenderDoc remote server"), message);
+    RDDialog::warning(this, tr("Problems launching GraphHelper remote server"), message);
   });
 }
 

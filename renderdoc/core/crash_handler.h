@@ -128,7 +128,7 @@ public:
     si.dwFlags |= STARTF_USESHOWWINDOW;
     si.wShowWindow = SW_HIDE;
 
-    HANDLE waitEvent = CreateEventA(NULL, TRUE, FALSE, "RENDERDOC_CRASHHANDLE");
+    HANDLE waitEvent = CreateEventA(NULL, TRUE, FALSE, "GRAPHHELPER_CRASHHANDLE");
 
     rdcstr dllpath;
     FileIO::GetLibraryFilename(dllpath);
@@ -165,7 +165,7 @@ private:
 
   rdcstr NewPipeName()
   {
-    return StringFormat::Fmt("\\\\.\\pipe\\RenderDocBreakpadServer%llu", Timing::GetTick());
+    return StringFormat::Fmt("\\\\.\\pipe\\GraphHelperBreakpadServer%llu", Timing::GetTick());
   }
 };
 

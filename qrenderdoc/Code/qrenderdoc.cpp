@@ -325,7 +325,7 @@ int main(int argc, char *argv[])
   QApplication application(argc, argv);
 
   QCommandLineParser parser;
-  parser.setApplicationDescription(tr("Qt UI for RenderDoc"));
+  parser.setApplicationDescription(tr("Qt UI for GraphHelper"));
   QCommandLineOption helpOption = parser.addHelpOption();
   QCommandLineOption versionOption = parser.addVersionOption();
 
@@ -388,7 +388,7 @@ int main(int argc, char *argv[])
 
   if(parser.isSet(versionOption))
   {
-    printf("QRenderDoc v%s (%s)\n", MAJOR_MINOR_VERSION_STRING, RENDERDOC_GetCommitHash());
+    printf("QGraphHelper v%s (%s)\n", MAJOR_MINOR_VERSION_STRING, RENDERDOC_GetCommitHash());
 #if defined(DISTRIBUTION_VERSION)
     printf("Packaged for %s - %s\n", DISTRIBUTION_NAME, DISTRIBUTION_CONTACT);
 #endif

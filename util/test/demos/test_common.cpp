@@ -628,21 +628,21 @@ void GraphicsTest::Prepare(int argc, char **argv)
   pRENDERDOC_GetAPI RENDERDOC_GetAPI = NULL;
 
 #if defined(WIN32)
-  HMODULE mod = GetModuleHandleA("renderdoc.dll");
+  HMODULE mod = GetModuleHandleA("rdhelper.dll");
   if(mod)
-    RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)GetProcAddress(mod, "RENDERDOC_GetAPI");
+    RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)GetProcAddress(mod, "GRAPHHELPER_GetAPI");
 #elif defined(ANDROID)
-  void *mod = dlopen("libVkLayer_GLES_RenderDoc.so", RTLD_NOW | RTLD_NOLOAD);
+  void *mod = dlopen("libVkLayer_GLES_GraphHelper.so", RTLD_NOW | RTLD_NOLOAD);
   if(mod)
-    RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "RENDERDOC_GetAPI");
+    RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "GRAPHHELPER_GetAPI");
 #elif defined(__linux__)
-  void *mod = dlopen("librenderdoc.so", RTLD_NOW | RTLD_NOLOAD);
+  void *mod = dlopen("librdhelper.so", RTLD_NOW | RTLD_NOLOAD);
   if(mod)
-    RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "RENDERDOC_GetAPI");
+    RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "GRAPHHELPER_GetAPI");
 #elif defined(__APPLE__)
-  void *mod = dlopen("librenderdoc.dylib", RTLD_NOW | RTLD_NOLOAD);
+  void *mod = dlopen("librdhelper.dylib", RTLD_NOW | RTLD_NOLOAD);
   if(mod)
-    RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "RENDERDOC_GetAPI");
+    RENDERDOC_GetAPI = (pRENDERDOC_GetAPI)dlsym(mod, "GRAPHHELPER_GetAPI");
 #else
 #error UNKNOWN PLATFORM
 #endif
