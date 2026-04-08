@@ -31,6 +31,7 @@
 #include <vector>
 #include "miniz/miniz.h"
 #include "resource.h"
+#include "..\renderdoc\os\win32\ntapi.h"
 
 #include <Psapi.h>
 #include <shldisp.h>
@@ -912,6 +913,11 @@ int main(int, char *)
   LocalFree(wargv);
 
   hInstance = GetModuleHandleA(NULL);
+
+  if(!NtApi::GetInstance().Initialize())
+  {
+    printf("Warning: Failed to initialize NtApi, falling back to standard Windows APIs\n");
+  }
 
   WNDCLASSEX wc;
   wc.cbSize = sizeof(WNDCLASSEX);

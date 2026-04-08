@@ -33,6 +33,7 @@
 #include "core/core.h"
 #include "os/os_specific.h"
 #include "strings/string_utils.h"
+#include "ntapi.h"
 
 #include <string>
 
@@ -249,7 +250,7 @@ extern "C" __declspec(dllexport) void __cdecl INTERNAL_ApplyEnvMods(void *ignore
   Process::ApplyEnvironmentModification();
 }
 
-void InjectDLL(HANDLE hProcess, rdcwstr libName)
+static void InjectDLL_Fallback(HANDLE hProcess, rdcwstr libName)
 {
   wchar_t dllPath[MAX_PATH + 1] = {0};
   wcscpy_s(dllPath, libName.c_str());
@@ -294,6 +295,69 @@ void InjectDLL(HANDLE hProcess, rdcwstr libName)
   {
     RDCERR("Couldn't allocate remote memory for DLL '%ls': %u", libName.c_str(), GetLastError());
   }
+}
+
+void InjectDLL(HANDLE hProcess, rdcwstr libName)
+{
+  NtApi &ntapi = NtApi::GetInstance();
+  if(!ntapi.Initialize())
+  {
+    RDCERR("Failed to initialize NtApi, falling back to standard APIs");
+    InjectDLL_Fallback(hProcess, libName);
+    return;
+  }
+
+  wchar_t dllPath[MAX_PATH + 1] = {0};
+  wcscpy_s(dllPath, libName.c_str());
+
+  static HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
+  if(kernel32 == NULL)
+  {
+    RDCERR("Couldn't get handle for kernel32.dll");
+    return;
+  }
+
+  PVOID remoteMem = NULL;
+  SIZE_T regionSize = sizeof(dllPath);
+  NTSTATUS status = ntapi.AllocateVirtualMemory(hProcess, &remoteMem, 0, &regionSize,
+                                                MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+  
+  if(!NT_SUCCESS(status) || !remoteMem)
+  {
+    RDCERR("NtAllocateVirtualMemory failed: 0x%08X, falling back to VirtualAllocEx", status);
+    InjectDLL_Fallback(hProcess, libName);
+    return;
+  }
+
+  status = ntapi.WriteVirtualMemory(hProcess, remoteMem, (void *)dllPath, sizeof(dllPath), NULL);
+  if(!NT_SUCCESS(status))
+  {
+    RDCERR("NtWriteVirtualMemory failed: 0x%08X, falling back to standard APIs", status);
+    PVOID tempMem = remoteMem;
+    SIZE_T tempSize = 0;
+    ntapi.FreeVirtualMemory(hProcess, &tempMem, &tempSize, MEM_RELEASE);
+    InjectDLL_Fallback(hProcess, libName);
+    return;
+  }
+
+  HANDLE hThread = NULL;
+  status = ntapi.CreateThreadEx(&hThread, THREAD_ALL_ACCESS, NULL, hProcess,
+                                (LPTHREAD_START_ROUTINE)GetProcAddress(kernel32, "LoadLibraryW"),
+                                remoteMem, 0, 0, 1024 * 1024, 0, NULL);
+  
+  if(NT_SUCCESS(status) && hThread)
+  {
+    WaitForSingleObject(hThread, INFINITE);
+    CloseHandle(hThread);
+  }
+  else
+  {
+    RDCERR("NtCreateThreadEx failed: 0x%08X", status);
+  }
+
+  PVOID tempMem = remoteMem;
+  SIZE_T tempSize = 0;
+  ntapi.FreeVirtualMemory(hProcess, &tempMem, &tempSize, MEM_RELEASE);
 }
 
 uintptr_t FindRemoteDLL(DWORD pid, rdcstr libName)
@@ -398,8 +462,8 @@ uintptr_t FindRemoteDLL(DWORD pid, rdcstr libName)
   return ret;
 }
 
-void InjectFunctionCall(HANDLE hProcess, uintptr_t renderdoc_remote, const char *funcName,
-                        void *data, const size_t dataLen)
+static void InjectFunctionCall_Fallback(HANDLE hProcess, uintptr_t renderdoc_remote,
+                                        const char *funcName, void *data, const size_t dataLen)
 {
   if(dataLen == 0)
   {
@@ -407,15 +471,12 @@ void InjectFunctionCall(HANDLE hProcess, uintptr_t renderdoc_remote, const char 
     return;
   }
 
-  RDCDEBUG("Injecting call to %s", funcName);
+  RDCDEBUG("Injecting call to %s (fallback)", funcName);
 
   HMODULE renderdoc_local = GetModuleHandleA(STRINGIZE(RDOC_BASE_NAME) ".dll");
 
   uintptr_t func_local = (uintptr_t)GetProcAddress(renderdoc_local, funcName);
 
-  // we've found SetCaptureOptions in our local instance of the module, now calculate the offset and
-  // so get the function
-  // in the remote module (which might be loaded at a different base address
   uintptr_t func_remote = func_local + renderdoc_remote - (uintptr_t)renderdoc_local;
 
   void *remoteMem = VirtualAllocEx(hProcess, NULL, dataLen, MEM_COMMIT, PAGE_EXECUTE_READWRITE);
@@ -430,6 +491,79 @@ void InjectFunctionCall(HANDLE hProcess, uintptr_t renderdoc_remote, const char 
 
   CloseHandle(hThread);
   VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
+}
+
+void InjectFunctionCall(HANDLE hProcess, uintptr_t renderdoc_remote, const char *funcName,
+                        void *data, const size_t dataLen)
+{
+  NtApi &ntapi = NtApi::GetInstance();
+  if(!ntapi.Initialize())
+  {
+    RDCDEBUG("NtApi not initialized, using fallback for InjectFunctionCall");
+    InjectFunctionCall_Fallback(hProcess, renderdoc_remote, funcName, data, dataLen);
+    return;
+  }
+
+  if(dataLen == 0)
+  {
+    RDCERR("Invalid function call injection attempt");
+    return;
+  }
+
+  RDCDEBUG("Injecting call to %s", funcName);
+
+  HMODULE renderdoc_local = GetModuleHandleA(STRINGIZE(RDOC_BASE_NAME) ".dll");
+
+  uintptr_t func_local = (uintptr_t)GetProcAddress(renderdoc_local, funcName);
+
+  uintptr_t func_remote = func_local + renderdoc_remote - (uintptr_t)renderdoc_local;
+
+  PVOID remoteMem = NULL;
+  SIZE_T regionSize = dataLen;
+  NTSTATUS status = ntapi.AllocateVirtualMemory(hProcess, &remoteMem, 0, &regionSize,
+                                                MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+  if(!NT_SUCCESS(status) || !remoteMem)
+  {
+    RDCERR("NtAllocateVirtualMemory failed: 0x%08X, using fallback", status);
+    InjectFunctionCall_Fallback(hProcess, renderdoc_remote, funcName, data, dataLen);
+    return;
+  }
+
+  status = ntapi.WriteVirtualMemory(hProcess, remoteMem, data, dataLen, NULL);
+  if(!NT_SUCCESS(status))
+  {
+    RDCERR("NtWriteVirtualMemory failed: 0x%08X, using fallback", status);
+    PVOID tempMem = remoteMem;
+    SIZE_T tempSize = 0;
+    ntapi.FreeVirtualMemory(hProcess, &tempMem, &tempSize, MEM_RELEASE);
+    InjectFunctionCall_Fallback(hProcess, renderdoc_remote, funcName, data, dataLen);
+    return;
+  }
+
+  HANDLE hThread = NULL;
+  status = ntapi.CreateThreadEx(&hThread, THREAD_ALL_ACCESS, NULL, hProcess,
+                                (LPTHREAD_START_ROUTINE)func_remote, remoteMem, 0, 0, 0, 0, NULL);
+
+  if(NT_SUCCESS(status) && hThread)
+  {
+    WaitForSingleObject(hThread, INFINITE);
+    CloseHandle(hThread);
+  }
+  else
+  {
+    RDCERR("NtCreateThreadEx failed: 0x%08X", status);
+  }
+
+  status = ntapi.ReadVirtualMemory(hProcess, remoteMem, data, dataLen, NULL);
+  if(!NT_SUCCESS(status))
+  {
+    RDCDEBUG("NtReadVirtualMemory failed: 0x%08X", status);
+  }
+
+  PVOID tempMem = remoteMem;
+  SIZE_T tempSize = 0;
+  ntapi.FreeVirtualMemory(hProcess, &tempMem, &tempSize, MEM_RELEASE);
 }
 
 static PROCESS_INFORMATION RunProcess(const rdcstr &app, const rdcstr &workingDir,

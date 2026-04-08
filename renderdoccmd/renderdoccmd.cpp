@@ -329,6 +329,116 @@ public:
   }
 };
 
+struct LaunchCommand : public Command
+{
+private:
+  std::string executable;
+  std::string workingDir;
+  std::string cmdLine;
+  std::string captureFile;
+  bool wait_for_exit = false;
+
+public:
+  LaunchCommand() : Command() {}
+  virtual void AddOptions(cmdline::parser &parser)
+  {
+    parser.set_footer("<executable> [args...]");
+    parser.add<std::string>("working-dir", 'd',
+                            "Set the working directory of the program.", false, "");
+    parser.add<std::string>("capture-file", 'c',
+                            "Set the filename template for new captures. Frame number will be "
+                            "automatically appended.",
+                            false, "");
+    parser.add("wait-for-exit", 'w',
+               "Wait for the target program to exit, before returning.");
+  }
+  virtual const char *Description()
+  {
+    return "Launches a program with RenderDoc injected from the start. This is the recommended "
+           "way to capture graphics APIs, as runtime injection may miss early initialization.";
+  }
+  virtual bool IsInternalOnly() { return false; }
+  virtual bool IsCaptureCommand() { return true; }
+  virtual bool Parse(cmdline::parser &parser, GlobalEnvironment &)
+  {
+    std::vector<std::string> rest = parser.rest();
+    parser.set_rest({});
+
+    if(rest.empty())
+    {
+      std::cerr << "Error: launch command requires an executable to launch." << std::endl
+                << std::endl
+                << parser.usage();
+      return false;
+    }
+
+    executable = rest[0];
+    workingDir = parser.get<std::string>("working-dir");
+    captureFile = parser.get<std::string>("capture-file");
+    wait_for_exit = parser.exist("wait-for-exit");
+
+    for(size_t i = 1; i < rest.size(); i++)
+    {
+      if(!cmdLine.empty())
+        cmdLine += ' ';
+
+      cmdLine += EscapeArgument(rest[i]);
+    }
+
+    return true;
+  }
+  virtual int Execute(const CaptureOptions &opts)
+  {
+    std::cout << "Launching '" << executable << "' with injection from start";
+
+    if(!cmdLine.empty())
+      std::cout << " with params: " << cmdLine;
+
+    std::cout << std::endl;
+
+    rdcarray<EnvironmentModification> env;
+
+    ExecuteResult res = RENDERDOC_ExecuteAndInject(
+        conv(executable), conv(workingDir), conv(cmdLine), env, conv(captureFile), opts,
+        wait_for_exit);
+
+    if(res.result.code != ResultCode::Succeeded)
+    {
+      std::cerr << "Failed to launch & inject: " << res.result.Message() << std::endl;
+      return (int)res.result.code;
+    }
+
+    if(wait_for_exit)
+    {
+      std::cerr << "'" << executable << "' finished executing." << std::endl;
+      res.ident = 0;
+    }
+    else
+    {
+      std::cerr << "Launched as ID " << res.ident << std::endl;
+    }
+
+    return res.ident;
+  }
+
+  std::string EscapeArgument(const std::string &arg)
+  {
+    if(arg.find_first_of(" \t\r\n\"") == std::string::npos)
+      return arg;
+
+    std::string ret = arg;
+
+    size_t i = ret.find('\"');
+    while(i != std::string::npos)
+    {
+      ret.insert(ret.begin() + i, '\\');
+      i = ret.find('\"', i + 2);
+    }
+
+    return '"' + ret + '"';
+  }
+};
+
 #if !defined(RDOC_SELFCAPTURE_LIMITEDAPI)
 
 struct ThumbCommand : public Command
@@ -1564,6 +1674,7 @@ int renderdoccmd(GlobalEnvironment &env, std::vector<std::string> &argv)
 
     add_command("capture", new CaptureCommand());
     add_command("inject", new InjectCommand());
+    add_command("launch", new LaunchCommand());
 
 #if !defined(RDOC_SELFCAPTURE_LIMITEDAPI)
     add_command("thumb", new ThumbCommand());

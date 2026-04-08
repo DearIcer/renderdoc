@@ -31,6 +31,8 @@
 #include "hooks/hooks.h"
 #include "strings/string_utils.h"
 
+#include "Hidedll.h"
+
 static BOOL add_hooks()
 {
   wchar_t curFile[512];
@@ -76,7 +78,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 {
   if(ul_reason_for_call == DLL_PROCESS_ATTACH)
   {
+    DisableThreadLibraryCalls(hModule);
+    
+    //todo: 有函数导出，不能直接这么使，有点难受
+    // HideDll DLL(hModule);
+    // DLL.RemoveLDR();
+    // DLL.RemoveMAP();
+    // DLL.RemovePEH();
     BOOL ret = add_hooks();
+    
     SetLastError(0);
     return ret;
   }
