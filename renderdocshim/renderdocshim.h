@@ -22,6 +22,8 @@
  * THE SOFTWARE.
  ******************************************************************************/
 
+#include <cstdint>
+
 struct ShimData
 {
   wchar_t pathmatchstring[2048];
@@ -30,7 +32,11 @@ struct ShimData
   char capfile[2048];
 
   unsigned char opts[512];
+
+  uint32_t flags;     // 0 = normal LoadLibrary injection, 1 = manual map
 };
+
+#define SHIM_FLAG_MANUALMAP 0x00000001
 
 #ifdef WIN64
 #define GLOBAL_HOOK_DATA_NAME "GraphHelperGlobalHookData64"

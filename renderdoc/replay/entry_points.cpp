@@ -416,6 +416,21 @@ RENDERDOC_InjectIntoProcess(uint32_t pid, const rdcarray<EnvironmentModification
   return ret;
 }
 
+extern "C" RENDERDOC_API ExecuteResult RENDERDOC_CC
+RENDERDOC_ManualMapInjectIntoProcess(uint32_t pid, const rdcarray<EnvironmentModification> &env,
+                                     const rdcstr &capturefile, const CaptureOptions &opts,
+                                     bool waitForExit, bool hideDll)
+{
+  rdcpair<RDResult, uint32_t> status =
+      Process::ManualMapInjectIntoProcess(pid, env, capturefile, opts, waitForExit != 0,
+                                          hideDll != 0);
+
+  ExecuteResult ret;
+  ret.result = status.first;
+  ret.ident = status.second;
+  return ret;
+}
+
 extern "C" RENDERDOC_API void RENDERDOC_CC RENDERDOC_FreeArrayMem(void *mem)
 {
   free(mem);

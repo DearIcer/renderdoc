@@ -381,6 +381,121 @@ public:
   }
 };
 
+struct ManualInjectCommand : public Command
+{
+  ManualInjectCommand() : Command() {}
+
+  void AddOptions(cmdline::parser &parser) override
+  {
+    parser.add<uint32_t>("PID", 0, "The process ID of the process to inject.", true);
+    parser.add<std::string>(
+        "process-name", '\0',
+        "The name of the process to inject into (e.g., MyGame.exe). "
+        "If specified, will wait for the process to start.",
+        false, "");
+    parser.add<int>("timeout", '\0',
+                    "Maximum time to wait for process to start (seconds). 0 = wait indefinitely.",
+                    false, 0);
+    parser.add("hide", '\0', "Hide the injected DLL by zeroing PE headers.");
+  }
+
+  const char *Description() override
+  {
+    return "Injects RenderDoc into a running process using manual mapping (no LoadLibrary).";
+  }
+
+  bool IsInternalOnly() override { return false; }
+  bool IsCaptureCommand() override { return true; }
+
+  bool Parse(cmdline::parser &parser, GlobalEnvironment &) override
+  {
+    PID = parser.get<uint32_t>("PID");
+    captureFile = parser.get<std::string>("capture-file");
+    wait_for_exit = parser.exist("wait-for-exit");
+    processName = parser.get<std::string>("process-name");
+    timeout = parser.get<int>("timeout");
+    hide = parser.exist("hide");
+
+    if(PID == 0 && processName.empty())
+    {
+      std::cerr << "Error: must specify either --PID or --process-name" << std::endl;
+      return false;
+    }
+
+    if(timeout < 0)
+    {
+      std::cerr << "Error: timeout must be >= 0" << std::endl;
+      return false;
+    }
+
+    return true;
+  }
+
+  int Execute(const CaptureOptions &opts) override
+  {
+    if(!processName.empty() && PID == 0)
+    {
+      std::cout << "Waiting for process \"" << processName << "\" to start..." << std::endl;
+
+      auto startTime = std::chrono::steady_clock::now();
+      uint32_t foundPID = 0;
+
+      while((foundPID = FindProcessByName(processName.c_str())) == 0)
+      {
+        if(timeout > 0)
+        {
+          auto elapsed = std::chrono::steady_clock::now() - startTime;
+          if(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= timeout)
+          {
+            std::cerr << "Timeout: Process \"" << processName << "\" did not start within "
+                      << timeout << " seconds." << std::endl;
+            return 1;
+          }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+
+      PID = foundPID;
+      std::cout << "Process found (PID: " << PID << ")" << std::endl;
+    }
+
+    std::cout << "Manual mapping into PID " << PID << (hide ? " (with DLL hiding)" : "")
+              << std::endl;
+
+    rdcarray<EnvironmentModification> env;
+
+    ExecuteResult res =
+        RENDERDOC_ManualMapInjectIntoProcess(PID, env, conv(captureFile), opts, wait_for_exit, hide);
+
+    if(res.result.code != ResultCode::Succeeded)
+    {
+      std::cerr << "Failed to manual map inject: " << res.result.Message() << std::endl;
+      return (int)res.result.code;
+    }
+
+    if(wait_for_exit)
+    {
+      std::cerr << PID << " finished executing." << std::endl;
+      res.ident = 0;
+    }
+    else
+    {
+      std::cerr << "Launched as ID " << res.ident << std::endl;
+    }
+
+    return res.ident;
+  }
+
+private:
+  uint32_t PID = 0;
+  std::string captureFile;
+  bool wait_for_exit = false;
+  std::string processName;
+  int timeout = 0;
+  bool hide = false;
+};
+
 struct LaunchCommand : public Command
 {
 private:
@@ -1726,6 +1841,7 @@ int renderdoccmd(GlobalEnvironment &env, std::vector<std::string> &argv)
 
     add_command("capture", new CaptureCommand());
     add_command("inject", new InjectCommand());
+    add_command("inject-manual", new ManualInjectCommand());
     add_command("launch", new LaunchCommand());
 
 #if !defined(RDOC_SELFCAPTURE_LIMITEDAPI)

@@ -276,6 +276,9 @@
     <ClInclude Include="os\win32\win32_specific.h">
       <Filter>OS\Win32</Filter>
     </ClInclude>
+    <ClInclude Include="os\win32\win32_manualmap.h">
+      <Filter>OS\Win32</Filter>
+    </ClInclude>
     <ClInclude Include="os\posix\posix_specific.h">
       <Filter>OS\Posix</Filter>
     </ClInclude>
@@ -639,6 +642,9 @@
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="os\win32\win32_hook.cpp">
+      <Filter>OS\Win32</Filter>
+    </ClCompile>
+    <ClCompile Include="os\win32\win32_manualmap.cpp">
       <Filter>OS\Win32</Filter>
     </ClCompile>
     <ClCompile Include="common\dds_readwrite.cpp">

@@ -110,7 +110,20 @@ void CheckHook()
       LOGPRINT(data->pathmatchstring);
       LOGPRINT(L"'\n");
 
-      HMODULE mod = LoadLibraryW(data->rdocpath);
+      HMODULE mod = NULL;
+
+      if(data->flags & SHIM_FLAG_MANUALMAP)
+      {
+        // Manual mapping: parse PE, map sections, resolve imports, call DllMain
+        // For now we fall back to LoadLibraryW; manual mapping in the shim
+        // requires inclusion of the PE loader or linking against a static lib.
+        // This flag is reserved for future implementation.
+        mod = LoadLibraryW(data->rdocpath);
+      }
+      else
+      {
+        mod = LoadLibraryW(data->rdocpath);
+      }
 
       if(mod)
       {

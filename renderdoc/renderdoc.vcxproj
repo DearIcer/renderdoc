@@ -673,6 +673,7 @@
     <ClCompile Include="os\win32\win32_stringio.cpp" />
     <ClCompile Include="os\win32\win32_threading.cpp" />
     <ClCompile Include="os\win32\hook_impl.cpp" />
+    <ClCompile Include="os\win32\win32_manualmap.cpp" />
     <ClCompile Include="replay\app_api.cpp" />
     <ClCompile Include="replay\basic_types_tests.cpp" />
     <ClCompile Include="replay\capture_file.cpp" />

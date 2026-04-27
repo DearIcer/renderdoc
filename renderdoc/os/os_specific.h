@@ -68,6 +68,9 @@ rdcpair<RDResult, uint32_t> InjectIntoProcess(uint32_t pid,
                                               const rdcarray<EnvironmentModification> &env,
                                               const rdcstr &capturefile, const CaptureOptions &opts,
                                               bool waitForExit);
+rdcpair<RDResult, uint32_t> ManualMapInjectIntoProcess(
+    uint32_t pid, const rdcarray<EnvironmentModification> &env, const rdcstr &capturefile,
+    const CaptureOptions &opts, bool waitForExit, bool hideDll = false);
 struct ProcessResult
 {
   rdcstr strStdout, strStderror;
