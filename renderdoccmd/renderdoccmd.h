@@ -59,3 +59,5 @@ void DisplayRendererPreview(IReplayController *renderer, TextureDisplay &display
                             uint32_t height, uint32_t numLoops);
 WindowingData DisplayRemoteServerPreview(bool active, const rdcarray<WindowingSystem> &systems);
 void Daemonise();
+
+uint32_t FindProcessByName(const char *processName);

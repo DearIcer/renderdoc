@@ -28,6 +28,7 @@
 #include <renderdocshim.h>
 #include <windows.h>
 #include <string>
+#include <wchar.h>
 #include <vector>
 #include "miniz/miniz.h"
 #include "resource.h"
@@ -61,6 +62,38 @@ static std::wstring conv(const std::string &str)
   ret.resize(wcslen(ret.c_str()));
 
   return ret;
+}
+
+uint32_t FindProcessByName(const char *processName)
+{
+    if(!processName || !*processName)
+        return 0;
+
+    HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if(hSnapshot == INVALID_HANDLE_VALUE)
+        return 0;
+
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32);
+
+    uint32_t pid = 0;
+
+    std::wstring wprocessName = conv(std::string(processName));
+
+    if(Process32First(hSnapshot, &pe))
+    {
+        do
+        {
+            if(_wcsicmp(pe.szExeFile, wprocessName.c_str()) == 0)
+            {
+                pid = pe.th32ProcessID;
+                break;
+            }
+        } while(Process32Next(hSnapshot, &pe));
+    }
+
+    CloseHandle(hSnapshot);
+    return pid;
 }
 
 HINSTANCE hInstance = NULL;

@@ -27,6 +27,8 @@
 #include <app/renderdoc_app.h>
 #include <replay/version.h>
 #include <string>
+#include <chrono>
+#include <thread>
 
 rdcstr conv(const std::string &s)
 {
@@ -284,14 +286,22 @@ private:
   uint32_t PID = 0;
   std::string captureFile;
   bool wait_for_exit = false;
+  std::string processName;
+  int timeout = 0;
 
 public:
   InjectCommand() : Command() {}
   virtual void AddOptions(cmdline::parser &parser)
   {
     parser.add<uint32_t>("PID", 0, "The process ID of the process to inject.", true);
+    parser.add<std::string>("process-name", '\0', 
+                           "The name of the process to inject into (e.g., MyGame.exe). "
+                           "If specified, will wait for the process to start.", false, "");
+    parser.add<int>("timeout", '\0', 
+                   "Maximum time to wait for process to start (seconds). 0 = wait indefinitely.",
+                   false, 0);
   }
-  virtual const char *Description() { return "Injects RenderDoc into a given running process."; }
+  virtual const char *Description() { return "Injects RenderDoc into a given running process. Can wait for a process to start by name."; }
   virtual bool IsInternalOnly() { return false; }
   virtual bool IsCaptureCommand() { return true; }
   virtual bool Parse(cmdline::parser &parser, GlobalEnvironment &)
@@ -299,10 +309,52 @@ public:
     PID = parser.get<uint32_t>("PID");
     captureFile = parser.get<std::string>("capture-file");
     wait_for_exit = parser.exist("wait-for-exit");
+    processName = parser.get<std::string>("process-name");
+    timeout = parser.get<int>("timeout");
+
+    if(PID == 0 && processName.empty())
+    {
+      std::cerr << "Error: must specify either --PID or --process-name" << std::endl;
+      return false;
+    }
+
+    if(timeout < 0)
+    {
+      std::cerr << "Error: timeout must be >= 0" << std::endl;
+      return false;
+    }
+
     return true;
   }
   virtual int Execute(const CaptureOptions &opts)
   {
+    if(!processName.empty() && PID == 0)
+    {
+      std::cout << "Waiting for process \"" << processName << "\" to start..." << std::endl;
+
+      auto startTime = std::chrono::steady_clock::now();
+      uint32_t foundPID = 0;
+
+      while((foundPID = FindProcessByName(processName.c_str())) == 0)
+      {
+        if(timeout > 0)
+        {
+          auto elapsed = std::chrono::steady_clock::now() - startTime;
+          if(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= timeout)
+          {
+            std::cerr << "Timeout: Process \"" << processName << "\" did not start within " 
+                      << timeout << " seconds." << std::endl;
+            return 1;
+          }
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      }
+
+      PID = foundPID;
+      std::cout << "Process found (PID: " << PID << ")" << std::endl;
+    }
+
     std::cout << "Injecting into PID " << PID << std::endl;
 
     rdcarray<EnvironmentModification> env;
