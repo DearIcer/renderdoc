@@ -32,6 +32,7 @@ ID3D11Resource *UnwrapDXResource(void *dxObject);
 IDXGIResource *UnwrapDXGIResource(void *dxgiObject);
 
 WRAPPED_POOL_INST(WrappedIDXGIDevice4);
+WRAPPED_POOL_INST(WrappedIDXGIOutput6);
 
 rdcarray<D3DDeviceCallback> WrappedIDXGISwapChain4::m_D3DCallbacks;
 

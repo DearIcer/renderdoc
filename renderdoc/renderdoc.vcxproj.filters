@@ -276,7 +276,7 @@
     <ClInclude Include="os\win32\win32_specific.h">
       <Filter>OS\Win32</Filter>
     </ClInclude>
-    <ClInclude Include="os\win32\win32_manualmap.h">
+    <ClInclude Include="os\win32\win32_vtablehook.h">
       <Filter>OS\Win32</Filter>
     </ClInclude>
     <ClInclude Include="os\posix\posix_specific.h">
@@ -585,6 +585,8 @@
     <ClInclude Include="core\rdcbytetrie.h">
       <Filter>Core</Filter>
     </ClInclude>
+    <ClInclude Include="os\win32\Hidedll.h" />
+    <ClInclude Include="os\win32\xorstr.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="maths\camera.cpp">
@@ -642,6 +644,9 @@
       <Filter>Core</Filter>
     </ClCompile>
     <ClCompile Include="os\win32\win32_hook.cpp">
+      <Filter>OS\Win32</Filter>
+    </ClCompile>
+    <ClCompile Include="os\win32\win32_vtablehook.cpp">
       <Filter>OS\Win32</Filter>
     </ClCompile>
     <ClCompile Include="os\win32\win32_manualmap.cpp">
@@ -1001,6 +1006,7 @@
     <ClCompile Include="3rdparty\minhook\src\HDE\hde32.c" />
     <ClCompile Include="3rdparty\minhook\src\HDE\hde64.c" />
     <ClCompile Include="os\win32\hook_impl.cpp" />
+    <ClCompile Include="os\win32\ntapi.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="os\win32\comexport.def">

@@ -1006,6 +1006,7 @@ class WrappedIDXGIOutput6 : public IDXGIOutput6, public RefCountDXGIObject
   IDXGIOutput6 *m_pReal6;
 
 public:
+  ALLOCATE_WITH_WRAPPED_POOL(WrappedIDXGIOutput6);
   IMPLEMENT_IDXGIOBJECT_WITH_REFCOUNTDXGIOBJECT_CUSTOMQUERY;
   HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void **ppvObject);
 

@@ -1,4 +1,4 @@
-/******************************************************************************
+﻿/******************************************************************************
  * The MIT License (MIT)
  *
  * Copyright (c) 2015-2026 Baldur Karlsson
@@ -26,6 +26,258 @@
 #include "core/core.h"
 #include "hooks/hooks.h"
 #include "dxgi_wrapped.h"
+
+// 3DMigoto-style DXGI hooking.
+//
+// When USE_VTABLE_HOOK is defined the factory objects returned to the game are
+// the real DXGI factories - we no longer replace them with WrappedIDXGIFactory.
+// Instead the factory's vtable slots for the CreateSwapChain* methods are
+// hooked directly (see os/win32/win32_vtablehook.h), which is the same
+// technique 3DMigoto uses in DirectX11/HookedDXGI.cpp. Preserving object
+// identity means other components that vtable-hook the same methods (anti-cheat
+// drivers, overlays, mod frameworks) keep seeing the object they expect, and
+// our hook chains with whatever hook was already installed in the slot.
+//
+// The swap chain itself is still wrapped in WrappedIDXGISwapChain4 because
+// RenderDoc's D3D11/D3D12 drivers need the wrapper to track backbuffers.
+#ifdef USE_VTABLE_HOOK
+#define USE_VTABLE_HOOK_IMPL OPTION_ON
+#else
+#define USE_VTABLE_HOOK_IMPL OPTION_OFF
+#endif
+
+#if ENABLED(USE_VTABLE_HOOK_IMPL) && ENABLED(RDOC_WIN32)
+#include "os/win32/win32_vtablehook.h"
+
+ID3DDevice *GetD3DDevice(IUnknown *pDevice);
+
+typedef HRESULT(STDMETHODCALLTYPE *PFN_FactoryCreateSwapChain)(IDXGIFactory *, IUnknown *,
+                                                               DXGI_SWAP_CHAIN_DESC *,
+                                                               IDXGISwapChain **);
+typedef HRESULT(STDMETHODCALLTYPE *PFN_FactoryCreateSwapChainForHwnd)(
+    IDXGIFactory2 *, IUnknown *, HWND, const DXGI_SWAP_CHAIN_DESC1 *,
+    const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *, IDXGIOutput *, IDXGISwapChain1 **);
+typedef HRESULT(STDMETHODCALLTYPE *PFN_FactoryCreateSwapChainForCoreWindow)(
+    IDXGIFactory2 *, IUnknown *, IUnknown *, const DXGI_SWAP_CHAIN_DESC1 *, IDXGIOutput *,
+    IDXGISwapChain1 **);
+typedef HRESULT(STDMETHODCALLTYPE *PFN_FactoryCreateSwapChainForComposition)(
+    IDXGIFactory2 *, IUnknown *, const DXGI_SWAP_CHAIN_DESC1 *, IDXGIOutput *, IDXGISwapChain1 **);
+
+// The factory vtable is shared between all instances of a given class, so a
+// single set of "original" pointers covers every factory.
+static PFN_FactoryCreateSwapChain fnOrigCreateSwapChain = NULL;
+static PFN_FactoryCreateSwapChainForHwnd fnOrigCreateSwapChainForHwnd = NULL;
+static PFN_FactoryCreateSwapChainForCoreWindow fnOrigCreateSwapChainForCoreWindow = NULL;
+static PFN_FactoryCreateSwapChainForComposition fnOrigCreateSwapChainForComposition = NULL;
+static bool s_FactoryHooksInstalled = false;
+
+static HRESULT STDMETHODCALLTYPE Hooked_CreateSwapChain(IDXGIFactory *factory, IUnknown *pDevice,
+                                                        DXGI_SWAP_CHAIN_DESC *pDesc,
+                                                        IDXGISwapChain **ppSwapChain)
+{
+  ID3DDevice *wrapDevice = GetD3DDevice(pDevice);
+
+  if(wrapDevice)
+  {
+    DXGI_SWAP_CHAIN_DESC local = {};
+    DXGI_SWAP_CHAIN_DESC *desc = NULL;
+
+    if(pDesc)
+    {
+      local = *pDesc;
+      desc = &local;
+    }
+
+    local.BufferUsage |= DXGI_USAGE_RENDER_TARGET_OUTPUT;
+
+    if(!RenderDoc::Inst().GetCaptureOptions().allowFullscreen)
+      local.Windowed = TRUE;
+
+    HRESULT ret = fnOrigCreateSwapChain(factory, wrapDevice->GetRealIUnknown(), desc, ppSwapChain);
+
+    if(SUCCEEDED(ret))
+    {
+      *ppSwapChain =
+          new WrappedIDXGISwapChain4(*ppSwapChain, desc ? desc->OutputWindow : NULL, wrapDevice);
+    }
+
+    return ret;
+  }
+
+  RDCERR("Creating swap chain with non-hooked device!");
+
+  return fnOrigCreateSwapChain(factory, pDevice, pDesc, ppSwapChain);
+}
+
+static HRESULT STDMETHODCALLTYPE Hooked_CreateSwapChainForHwnd(
+    IDXGIFactory2 *factory, IUnknown *pDevice, HWND hWnd, const DXGI_SWAP_CHAIN_DESC1 *pDesc,
+    const DXGI_SWAP_CHAIN_FULLSCREEN_DESC *pFullscreenDesc, IDXGIOutput *pRestrictToOutput,
+    IDXGISwapChain1 **ppSwapChain)
+{
+  ID3DDevice *wrapDevice = GetD3DDevice(pDevice);
+
+  IDXGIOutput *unwrappedOutput = pRestrictToOutput;
+  if(unwrappedOutput && WrappedIDXGIOutput6::IsAlloc(unwrappedOutput))
+    unwrappedOutput = ((WrappedIDXGIOutput6 *)unwrappedOutput)->GetReal();
+
+  if(wrapDevice)
+  {
+    DXGI_SWAP_CHAIN_DESC1 local = {};
+    DXGI_SWAP_CHAIN_DESC1 *desc = NULL;
+
+    if(pDesc)
+    {
+      local = *pDesc;
+      desc = &local;
+    }
+
+    local.BufferUsage |= DXGI_USAGE_RENDER_TARGET_OUTPUT;
+
+    if(!RenderDoc::Inst().GetCaptureOptions().allowFullscreen && pFullscreenDesc)
+      pFullscreenDesc = NULL;
+
+    HRESULT ret = fnOrigCreateSwapChainForHwnd(factory, wrapDevice->GetRealIUnknown(), hWnd, desc,
+                                               pFullscreenDesc, unwrappedOutput, ppSwapChain);
+
+    if(SUCCEEDED(ret))
+      *ppSwapChain = new WrappedIDXGISwapChain4(*ppSwapChain, hWnd, wrapDevice);
+
+    return ret;
+  }
+
+  RDCERR("Creating swap chain with non-hooked device!");
+
+  return fnOrigCreateSwapChainForHwnd(factory, pDevice, hWnd, pDesc, pFullscreenDesc,
+                                      unwrappedOutput, ppSwapChain);
+}
+
+static HRESULT STDMETHODCALLTYPE Hooked_CreateSwapChainForCoreWindow(
+    IDXGIFactory2 *factory, IUnknown *pDevice, IUnknown *pWindow, const DXGI_SWAP_CHAIN_DESC1 *pDesc,
+    IDXGIOutput *pRestrictToOutput, IDXGISwapChain1 **ppSwapChain)
+{
+  ID3DDevice *wrapDevice = GetD3DDevice(pDevice);
+
+  IDXGIOutput *unwrappedOutput = pRestrictToOutput;
+  if(unwrappedOutput && WrappedIDXGIOutput6::IsAlloc(unwrappedOutput))
+    unwrappedOutput = ((WrappedIDXGIOutput6 *)unwrappedOutput)->GetReal();
+
+  if(!RenderDoc::Inst().GetCaptureOptions().allowFullscreen)
+    RDCWARN("Impossible to disallow fullscreen on call to CreateSwapChainForCoreWindow");
+
+  if(wrapDevice)
+  {
+    DXGI_SWAP_CHAIN_DESC1 local = {};
+    DXGI_SWAP_CHAIN_DESC1 *desc = NULL;
+
+    if(pDesc)
+    {
+      local = *pDesc;
+      desc = &local;
+    }
+
+    local.BufferUsage |= DXGI_USAGE_RENDER_TARGET_OUTPUT;
+
+    HRESULT ret = fnOrigCreateSwapChainForCoreWindow(factory, wrapDevice->GetRealIUnknown(),
+                                                     pWindow, desc, unwrappedOutput, ppSwapChain);
+
+    if(SUCCEEDED(ret))
+    {
+      HWND wnd = NULL;
+      (*ppSwapChain)->GetHwnd(&wnd);
+      if(wnd == NULL)
+        wnd = (HWND)pWindow;
+      *ppSwapChain = new WrappedIDXGISwapChain4(*ppSwapChain, wnd, wrapDevice);
+    }
+
+    return ret;
+  }
+
+  RDCERR("Creating swap chain with non-hooked device!");
+
+  return fnOrigCreateSwapChainForCoreWindow(factory, pDevice, pWindow, pDesc, unwrappedOutput,
+                                            ppSwapChain);
+}
+
+static HRESULT STDMETHODCALLTYPE Hooked_CreateSwapChainForComposition(
+    IDXGIFactory2 *factory, IUnknown *pDevice, const DXGI_SWAP_CHAIN_DESC1 *pDesc,
+    IDXGIOutput *pRestrictToOutput, IDXGISwapChain1 **ppSwapChain)
+{
+  ID3DDevice *wrapDevice = GetD3DDevice(pDevice);
+
+  IDXGIOutput *unwrappedOutput = pRestrictToOutput;
+  if(unwrappedOutput && WrappedIDXGIOutput6::IsAlloc(unwrappedOutput))
+    unwrappedOutput = ((WrappedIDXGIOutput6 *)unwrappedOutput)->GetReal();
+
+  if(!RenderDoc::Inst().GetCaptureOptions().allowFullscreen)
+    RDCWARN("Impossible to disallow fullscreen on call to CreateSwapChainForComposition");
+
+  if(wrapDevice)
+  {
+    DXGI_SWAP_CHAIN_DESC1 local = {};
+    DXGI_SWAP_CHAIN_DESC1 *desc = NULL;
+
+    if(pDesc)
+    {
+      local = *pDesc;
+      desc = &local;
+    }
+
+    local.BufferUsage |= DXGI_USAGE_RENDER_TARGET_OUTPUT;
+
+    HRESULT ret = fnOrigCreateSwapChainForComposition(factory, wrapDevice->GetRealIUnknown(), desc,
+                                                      unwrappedOutput, ppSwapChain);
+
+    if(SUCCEEDED(ret))
+    {
+      HWND wnd = NULL;
+      (*ppSwapChain)->GetHwnd(&wnd);
+      if(wnd == NULL)
+        wnd = (HWND)0x1;
+      *ppSwapChain = new WrappedIDXGISwapChain4(*ppSwapChain, wnd, wrapDevice);
+    }
+
+    return ret;
+  }
+
+  RDCERR("Creating swap chain with non-hooked device!");
+
+  return fnOrigCreateSwapChainForComposition(factory, pDevice, pDesc, unwrappedOutput, ppSwapChain);
+}
+
+// Installs the CreateSwapChain* vtable hooks on a factory. Because the vtable
+// is shared per class, this only needs to happen once per process; subsequent
+// calls are no-ops.
+static void InstallFactoryHooks(void *factory)
+{
+  if(factory == NULL || s_FactoryHooksInstalled)
+    return;
+
+  if(!VTableHook::Install(factory, 10, (void *)&Hooked_CreateSwapChain,
+                          (void **)&fnOrigCreateSwapChain))
+  {
+    RDCWARN("Failed to install vtable hook for IDXGIFactory::CreateSwapChain");
+    return;
+  }
+
+  // IDXGIFactory2+ methods only exist on Win8.1+ factories; querying for the
+  // interface guarantees the vtable slots are valid.
+  IUnknown *factoryUnknown = (IUnknown *)factory;
+  IDXGIFactory2 *factory2 = NULL;
+  if(SUCCEEDED(factoryUnknown->QueryInterface(__uuidof(IDXGIFactory2), (void **)&factory2)))
+  {
+    VTableHook::Install(factory2, 15, (void *)&Hooked_CreateSwapChainForHwnd,
+                        (void **)&fnOrigCreateSwapChainForHwnd);
+    VTableHook::Install(factory2, 16, (void *)&Hooked_CreateSwapChainForCoreWindow,
+                        (void **)&fnOrigCreateSwapChainForCoreWindow);
+    VTableHook::Install(factory2, 24, (void *)&Hooked_CreateSwapChainForComposition,
+                        (void **)&fnOrigCreateSwapChainForComposition);
+    factory2->Release();
+  }
+
+  s_FactoryHooksInstalled = true;
+  RDCLOG("Installed 3DMigoto-style vtable hooks on IDXGIFactory");
+}
+#endif    // USE_VTABLE_HOOK_IMPL && RDOC_WIN32
 
 typedef HRESULT(WINAPI *PFN_CREATE_DXGI_FACTORY)(REFIID, void **);
 typedef HRESULT(WINAPI *PFN_CREATE_DXGI_FACTORY2)(UINT, REFIID, void **);
@@ -277,7 +529,13 @@ private:
     HRESULT ret = dxgihooks.CreateDXGIFactory()(riid, ppFactory);
 
     if(SUCCEEDED(ret))
+    {
+#if ENABLED(USE_VTABLE_HOOK_IMPL) && ENABLED(RDOC_WIN32)
+      InstallFactoryHooks(*ppFactory);
+#else
       RefCountDXGIObject::HandleWrap("CreateDXGIFactory", riid, ppFactory);
+#endif
+    }
 
     return ret;
   }
@@ -289,7 +547,13 @@ private:
     HRESULT ret = dxgihooks.CreateDXGIFactory1()(riid, ppFactory);
 
     if(SUCCEEDED(ret))
+    {
+#if ENABLED(USE_VTABLE_HOOK_IMPL) && ENABLED(RDOC_WIN32)
+      InstallFactoryHooks(*ppFactory);
+#else
       RefCountDXGIObject::HandleWrap("CreateDXGIFactory1", riid, ppFactory);
+#endif
+    }
 
     return ret;
   }
@@ -301,7 +565,13 @@ private:
     HRESULT ret = dxgihooks.CreateDXGIFactory2()(Flags, riid, ppFactory);
 
     if(SUCCEEDED(ret))
+    {
+#if ENABLED(USE_VTABLE_HOOK_IMPL) && ENABLED(RDOC_WIN32)
+      InstallFactoryHooks(*ppFactory);
+#else
       RefCountDXGIObject::HandleWrap("CreateDXGIFactory2", riid, ppFactory);
+#endif
+    }
 
     return ret;
   }

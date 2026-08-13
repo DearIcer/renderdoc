@@ -32,7 +32,7 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <CharacterSet>Unicode</CharacterSet>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
     <LinkIncremental>false</LinkIncremental>
@@ -245,6 +245,7 @@
     <ClInclude Include="os\win32\dia2_stubs.h" />
     <ClInclude Include="os\win32\Hidedll.h" />
     <ClInclude Include="os\win32\win32_specific.h" />
+    <ClInclude Include="os\win32\win32_vtablehook.h" />
     <ClInclude Include="os\win32\xorstr.h" />
     <ClInclude Include="replay\common\var_dispatch_helpers.h" />
     <ClInclude Include="replay\dummy_driver.h" />
@@ -532,31 +533,31 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles>
       </ForcedIncludeFiles>
-      <DisableSpecificWarnings>4310;4244</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4310;4244;4706</DisableSpecificWarnings>
     </ClCompile>
     <ClCompile Include="3rdparty\minhook\src\buffer.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles>
       </ForcedIncludeFiles>
-      <DisableSpecificWarnings>4201</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4201;4706</DisableSpecificWarnings>
     </ClCompile>
     <ClCompile Include="3rdparty\minhook\src\trampoline.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles>
       </ForcedIncludeFiles>
-      <DisableSpecificWarnings>4201;4244</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4201;4244;4706</DisableSpecificWarnings>
     </ClCompile>
     <ClCompile Include="3rdparty\minhook\src\HDE\hde32.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles>
       </ForcedIncludeFiles>
-      <DisableSpecificWarnings>4206</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4206;4706</DisableSpecificWarnings>
     </ClCompile>
     <ClCompile Include="3rdparty\minhook\src\HDE\hde64.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <ForcedIncludeFiles>
       </ForcedIncludeFiles>
-      <DisableSpecificWarnings>4701</DisableSpecificWarnings>
+      <DisableSpecificWarnings>4701;4706</DisableSpecificWarnings>
     </ClCompile>
     <ClCompile Include="android\android.cpp" />
     <ClCompile Include="android\android_tools.cpp" />
@@ -665,6 +666,7 @@
     <ClCompile Include="os\win32\sys_win32_hooks.cpp" />
     <ClCompile Include="os\win32\win32_callstack.cpp" />
     <ClCompile Include="os\win32\win32_hook.cpp" />
+    <ClCompile Include="os\win32\win32_vtablehook.cpp" />
     <ClCompile Include="os\win32\win32_libentry.cpp" />
     <ClCompile Include="os\win32\win32_network.cpp" />
     <ClCompile Include="os\win32\ntapi.cpp" />

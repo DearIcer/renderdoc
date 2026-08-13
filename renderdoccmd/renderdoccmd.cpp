@@ -509,15 +509,11 @@ public:
   LaunchCommand() : Command() {}
   virtual void AddOptions(cmdline::parser &parser)
   {
+    // working-dir / capture-file / wait-for-exit and the capture options are
+    // registered by the common capture-command setup (see main()), because
+    // IsCaptureCommand() returns true. Adding them here too would raise a
+    // "multiple definition" error in the option parser.
     parser.set_footer("<executable> [args...]");
-    parser.add<std::string>("working-dir", 'd',
-                            "Set the working directory of the program.", false, "");
-    parser.add<std::string>("capture-file", 'c',
-                            "Set the filename template for new captures. Frame number will be "
-                            "automatically appended.",
-                            false, "");
-    parser.add("wait-for-exit", 'w',
-               "Wait for the target program to exit, before returning.");
   }
   virtual const char *Description()
   {

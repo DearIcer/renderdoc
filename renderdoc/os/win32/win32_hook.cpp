@@ -1,4 +1,4 @@
-/******************************************************************************
+﻿/******************************************************************************
  * The MIT License (MIT)
  *
  * Copyright (c) 2015-2026 Baldur Karlsson
@@ -59,26 +59,84 @@ static bool s_MinHookInitialized = false;
 // Using MinHook instead of IAT patching
 static bool s_UseMinHook = USE_MINHOOK_IMPL;
 
-bool ApplyHook(FunctionHook &hook, void **IATentry, bool &already)
+struct DllHookset;
+
+// Returns true if the function prologue looks like it was already modified by
+// another inline hook (a near or short relative jump is the classic signature
+// used by hooking libraries such as MinHook/Detours/Nektra). In that case we
+// must not install our own inline hook on the same bytes: the other hook (often
+// an anti-cheat) owns that code, and double-hooking it either breaks the chain
+// or trips integrity checks. We fall back to IAT patching / GetProcAddress
+// interception for those functions instead, which chains through the existing
+// hook naturally via the original function pointer.
+static bool IsInlineHookPresent(void *func)
+{
+  if(func == NULL)
+    return false;
+
+  MEMORY_BASIC_INFORMATION mbi;
+  if(VirtualQuery(func, &mbi, sizeof(mbi)) == 0)
+    return false;
+
+  // if the page isn't readable we can't inspect the prologue, assume it's intact
+  if(mbi.Protect == PAGE_EXECUTE || mbi.Protect == PAGE_NOACCESS)
+    return false;
+
+  const byte *code = (const byte *)func;
+
+  // E9 xx xx xx xx - jmp rel32
+  if(code[0] == 0xE9)
+    return true;
+
+  // EB xx - jmp rel8
+  if(code[0] == 0xEB)
+    return true;
+
+  // FF 25 xx xx xx xx / 48 FF 25 xx xx xx xx - jmp [rip+disp32] (indirect,
+  // used by several hooking libraries and anti-cheat components)
+  if(code[0] == 0xFF && code[1] == 0x25)
+    return true;
+  if(code[0] == 0x48 && code[1] == 0xFF && code[2] == 0x25)
+    return true;
+
+  // 48 B8 imm64 ; FF E0 - mov rax, imm64 ; jmp rax (absolute jump used by
+  // Detours-style and custom anti-cheat hooks on x64)
+  if(code[0] == 0x48 && code[1] == 0xB8 && code[10] == 0xFF && code[11] == 0xE0)
+    return true;
+
+  return false;
+}
+
+// Defined after DllHookset. Returns true if an inline (MinHook) hook is active
+// for `function` in `hookset`.
+bool IsInlineHookActive(DllHookset *hookset, const rdcstr &function);
+
+bool ApplyHook(DllHookset *hookset, FunctionHook &hook, void **IATentry, bool &already)
 {
   if(s_UseMinHook)
   {
-    // With MinHook, we don't patch IAT directly
-    // MinHook handles the hooking internally
-    if(IATentry && *IATentry == hook.hook)
+    // If the export has an active inline (MinHook) hook we don't patch the
+    // IAT - the inline hook catches every caller. If the inline hook was
+    // skipped (because another component already hooked the export, or the
+    // export wasn't available yet) we fall through and patch the IAT instead,
+    // so imports still reach us and chain through the existing hook.
+    if(IsInlineHookActive(hookset, hook.function))
     {
-      already = true;
+      if(IATentry && *IATentry == hook.hook)
+      {
+        already = true;
+        return true;
+      }
+
+      // We still need to track what we've hooked for proper cleanup
+      {
+        SCOPED_LOCK(installedLock);
+        if(IATentry && s_InstalledHooks.find(IATentry) == s_InstalledHooks.end())
+          s_InstalledHooks[IATentry] = *IATentry;
+      }
+
       return true;
     }
-
-    // We still need to track what we've hooked for proper cleanup
-    {
-      SCOPED_LOCK(installedLock);
-      if(IATentry && s_InstalledHooks.find(IATentry) == s_InstalledHooks.end())
-        s_InstalledHooks[IATentry] = *IATentry;
-    }
-
-    return true;
   }
 
   DWORD oldProtection = PAGE_EXECUTE;
@@ -131,6 +189,12 @@ struct DllHookset
   rdcarray<FunctionLoadCallback> Callbacks;
   Threading::CriticalSection ordinallock;
 
+  // functions in this library that have an active inline (MinHook) hook
+  std::set<rdcstr> inlineHooked;
+  // functions whose export was already hooked by another component - we skip
+  // the inline hook for these and intercept via IAT/GetProcAddress instead
+  std::set<rdcstr> inlineSkipped;
+
   void FetchOrdinalNames()
   {
     SCOPED_LOCK(ordinallock);
@@ -181,6 +245,76 @@ struct DllHookset
     }
   }
 };
+
+// Creates an inline (MinHook) hook on an export of `hookset`'s module. Returns
+// true if the inline hook is now active, false if it was skipped (already
+// hooked by another component, or the export/module is unavailable).
+static bool CreateMinHookForExport(const char *libraryName, DllHookset &hookset,
+                                   const FunctionHook &hook)
+{
+  if(!s_MinHookInitialized || hook.hook == NULL)
+    return false;
+
+  if(hookset.inlineHooked.find(hook.function) != hookset.inlineHooked.end())
+    return true;
+
+  if(hookset.inlineSkipped.find(hook.function) != hookset.inlineSkipped.end())
+    return false;
+
+  // LoadLibrary/GetProcAddress are always hooked through the IAT so that
+  // RenderDoc can see late-loaded modules. They are never inline-hooked.
+  if(hook.function == "LoadLibraryA" || hook.function == "LoadLibraryW" ||
+     hook.function == "LoadLibraryExA" || hook.function == "LoadLibraryExW" ||
+     hook.function == "GetProcAddress")
+    return false;
+
+  HMODULE module = hookset.module;
+  if(module == NULL)
+    return false;
+
+  FARPROC targetFunc = GetProcAddress(module, hook.function.c_str());
+  if(targetFunc == NULL)
+    return false;
+
+  if(IsInlineHookPresent((void *)targetFunc))
+  {
+    // someone else (typically the anti-cheat) already owns this export's code.
+    // Don't double-hook it - imports are intercepted via the IAT below, and
+    // Hooked_GetProcAddress redirects dynamic lookups.
+    RDCLOG(
+        "Export %s!%s is already inline-hooked by another component - skipping "
+        "MinHook, using IAT/GetProcAddress fallback",
+        libraryName, hook.function.c_str());
+    hookset.inlineSkipped.insert(hook.function);
+    return false;
+  }
+
+  MH_STATUS status = MH_CreateHook((LPVOID)targetFunc, hook.hook, hook.orig);
+  if(status != MH_OK)
+  {
+    RDCLOG("Failed to create MinHook for %s!%s (%s) - using IAT/GetProcAddress fallback",
+           libraryName, hook.function.c_str(), MH_StatusToString(status));
+    hookset.inlineSkipped.insert(hook.function);
+    return false;
+  }
+
+  status = MH_EnableHook((LPVOID)targetFunc);
+  if(status != MH_OK)
+  {
+    RDCERR("Failed to enable MinHook for %s!%s: %s", libraryName, hook.function.c_str(),
+           MH_StatusToString(status));
+    hookset.inlineSkipped.insert(hook.function);
+    return false;
+  }
+
+  hookset.inlineHooked.insert(hook.function);
+  return true;
+}
+
+bool IsInlineHookActive(DllHookset *hookset, const rdcstr &function)
+{
+  return hookset != NULL && hookset->inlineHooked.find(function) != hookset->inlineHooked.end();
+}
 
 struct CachedHookData
 {
@@ -236,6 +370,19 @@ struct CachedHookData
           it->second.module = module;
 
           it->second.hooksfetched = true;
+
+          // If using MinHook, install inline hooks on this module's exports now
+          // that it's loaded. Doing this here (rather than only in
+          // RegisterFunctionHook) covers libraries that are loaded after
+          // RenderDoc initialises. MH_CreateHook fills in hook.orig with the
+          // trampoline, so the GetProcAddress fetch below only runs for
+          // functions that couldn't be hooked inline (e.g. because another
+          // component already hooked the export).
+          if(s_UseMinHook && s_MinHookInitialized)
+          {
+            for(FunctionHook &hook : it->second.FunctionHooks)
+              CreateMinHookForExport(it->first.c_str(), it->second, hook);
+          }
 
           // fetch all function hooks here, since we want to fill out the original function pointer
           // even in case nothing imports from that function (which means it would not get filled
@@ -454,7 +601,7 @@ struct CachedHookData
                     bool applied;
                     {
                       SCOPED_LOCK(lock);
-                      applied = ApplyHook(*found, IATentry, already);
+                      applied = ApplyHook(hookset, *found, IATentry, already);
                     }
 
                     // if we failed, or if it's already set and we're not doing a missedOrdinals
@@ -517,7 +664,7 @@ struct CachedHookData
             bool applied;
             {
               SCOPED_LOCK(lock);
-              applied = ApplyHook(*found, IATentry, already);
+              applied = ApplyHook(hookset, *found, IATentry, already);
             }
 
             // if we failed, or if it's already set and we're not doing a missedOrdinals
@@ -977,35 +1124,19 @@ void LibraryHooks::RegisterFunctionHook(const char *libraryName, const FunctionH
     }
   }
 
-  // If using MinHook, create the hook now
+  DllHookset &hookset = s_HookData->DllHooks[strlower(rdcstr(libraryName))];
+
+  // If using MinHook, create the hook now if the module is already loaded. If
+  // it isn't loaded yet, the hook is created later when the module loads (see
+  // the module-setup block in ApplyHooks).
   if(s_UseMinHook && s_MinHookInitialized)
   {
-    HMODULE hModule = GetModuleHandleA(libraryName);
-    if(hModule)
-    {
-      FARPROC targetFunc = GetProcAddress(hModule, hook.function.c_str());
-      if(targetFunc && hook.hook)
-      {
-        MH_STATUS status = MH_CreateHook((LPVOID)targetFunc, hook.hook, hook.orig);
-        if(status == MH_OK)
-        {
-          status = MH_EnableHook((LPVOID)targetFunc);
-          if(status != MH_OK)
-          {
-            RDCERR("Failed to enable MinHook for %s!%s: %d", libraryName, hook.function.c_str(),
-                   status);
-          }
-        }
-        else
-        {
-          RDCERR("Failed to create MinHook for %s!%s: %d", libraryName, hook.function.c_str(),
-                 status);
-        }
-      }
-    }
+    hookset.module = GetModuleHandleA(libraryName);
+    if(hookset.module)
+      CreateMinHookForExport(libraryName, hookset, hook);
   }
 
-  s_HookData->DllHooks[strlower(rdcstr(libraryName))].FunctionHooks.push_back(hook);
+  hookset.FunctionHooks.push_back(hook);
 }
 
 void LibraryHooks::RegisterLibraryHook(const char *libraryName, FunctionLoadCallback loadedCallback)
@@ -1084,7 +1215,15 @@ void LibraryHooks::RemoveHooks()
       RDCERR("Failed to uninitialize MinHook: %d", status);
     }
     s_MinHookInitialized = false;
-    return;
+
+    for(auto it = s_HookData->DllHooks.begin(); it != s_HookData->DllHooks.end(); ++it)
+    {
+      it->second.inlineHooked.clear();
+      it->second.inlineSkipped.clear();
+    }
+
+    // fall through and restore any IAT entries we patched as fallbacks for
+    // functions whose exports were already hooked by another component
   }
 
   for(auto it = s_InstalledHooks.begin(); it != s_InstalledHooks.end(); ++it)

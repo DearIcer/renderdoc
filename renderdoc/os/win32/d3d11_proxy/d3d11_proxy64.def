@@ -1,0 +1,4 @@
+EXPORTS
+  D3D11CreateDevice @34
+  D3D11CreateDeviceAndSwapChain @35
+  D3D11On12CreateDevice @36

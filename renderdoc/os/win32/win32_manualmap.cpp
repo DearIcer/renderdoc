@@ -1,4 +1,4 @@
-#include <windows.h>
+﻿#include <windows.h>
 #include "win32_manualmap.h"
 #include "common/formatting.h"
 #include "core/core.h"
@@ -13,12 +13,16 @@
 static const uint8_t g_DllMainShellcode[] = {
     // mov rax, [rcx]           ; rax = imageBase
     0x48, 0x8B, 0x01,
+    // mov r9, [rcx + 8]        ; r9 = entryPointRVA
+    0x4D, 0x8B, 0x49, 0x08,
+    // mov rcx, rax             ; hModule = imageBase
+    0x48, 0x8B, 0xC8,
     // mov edx, 1               ; dwReason = DLL_PROCESS_ATTACH
     0xBA, 0x01, 0x00, 0x00, 0x00,
     // xor r8, r8                ; lpReserved = NULL
     0x4D, 0x33, 0xC0,
-    // add rax, [rcx + 8]       ; rax += entryPointRVA
-    0x48, 0x03, 0x41, 0x08,
+    // add rax, r9               ; rax += entryPointRVA
+    0x4D, 0x01, 0xC8,
     // call rax                  ; call DllMain
     0xFF, 0xD0,
     // ret
@@ -255,88 +259,35 @@ static uintptr_t RemoteLoadLibrary(HANDLE hProcess, const wchar_t *dllName)
   return 0;
 }
 
-static uintptr_t RemoteGetProcAddress(HANDLE hProcess, uintptr_t remoteModule, const char *funcName)
+// Resolve an imported function in the injector process. The imported modules
+// of renderdoc.dll are all system/CRT DLLs, which Windows maps at the same
+// virtual address in every process (ASLR is per-boot for system images), so the
+// address returned by the local GetProcAddress is also valid in the target. The
+// DLL itself is still loaded into the target first (RemoteLoadLibrary above) so
+// the import is present there.
+static uintptr_t ResolveImportLocally(const char *dllName, const char *funcName)
 {
-  NtApi &ntapi = NtApi::GetInstance();
-  if(!ntapi.Initialize())
+  HMODULE localModule = LoadLibraryA(dllName);
+  if(localModule == NULL)
     return 0;
 
-  SIZE_T nameSize = strlen(funcName) + 1;
-  PVOID remoteName = NULL;
-  SIZE_T regionSize = nameSize;
-  NTSTATUS status = ntapi.AllocateVirtualMemory(hProcess, &remoteName, 0, &regionSize,
-                                                MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-  if(!NT_SUCCESS(status) || !remoteName)
+  uintptr_t func = (uintptr_t)GetProcAddress(localModule, funcName);
+
+  // LoadLibraryA above only incremented the loader refcount, releasing it again
+  // does not unload a module that was already resident.
+  FreeLibrary(localModule);
+  return func;
+}
+
+static uintptr_t ResolveImportLocally(const char *dllName, WORD ordinal)
+{
+  HMODULE localModule = LoadLibraryA(dllName);
+  if(localModule == NULL)
     return 0;
 
-  if(!NT_SUCCESS(ntapi.WriteVirtualMemory(hProcess, remoteName, (PVOID)funcName, nameSize, NULL)))
-  {
-    PVOID tmp = remoteName;
-    SIZE_T tmpSize = 0;
-    ntapi.FreeVirtualMemory(hProcess, &tmp, &tmpSize, MEM_RELEASE);
-    return 0;
-  }
-
-  HMODULE kernel32 = GetModuleHandleA("kernel32.dll");
-  FARPROC getProc = GetProcAddress(kernel32, "GetProcAddress");
-  if(!getProc)
-  {
-    PVOID tmp = remoteName;
-    SIZE_T tmpSize = 0;
-    ntapi.FreeVirtualMemory(hProcess, &tmp, &tmpSize, MEM_RELEASE);
-    return 0;
-  }
-
-  HANDLE hThread = NULL;
-  uintptr_t params[2] = {remoteModule, (uintptr_t)remoteName};
-  PVOID remoteParams = NULL;
-  SIZE_T paramSize = sizeof(params);
-  status = ntapi.AllocateVirtualMemory(hProcess, &remoteParams, 0, &paramSize,
-                                       MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-  if(!NT_SUCCESS(status) || !remoteParams)
-  {
-    PVOID tmp = remoteName;
-    SIZE_T tmpSize = 0;
-    ntapi.FreeVirtualMemory(hProcess, &tmp, &tmpSize, MEM_RELEASE);
-    return 0;
-  }
-
-  if(!NT_SUCCESS(ntapi.WriteVirtualMemory(hProcess, remoteParams, params, sizeof(params), NULL)))
-  {
-    PVOID tmp = remoteName;
-    SIZE_T tmpSize = 0;
-    ntapi.FreeVirtualMemory(hProcess, &tmp, &tmpSize, MEM_RELEASE);
-    tmp = remoteParams;
-    tmpSize = 0;
-    ntapi.FreeVirtualMemory(hProcess, &tmp, &tmpSize, MEM_RELEASE);
-    return 0;
-  }
-
-  status = ntapi.CreateThreadEx(&hThread, THREAD_ALL_ACCESS, NULL, hProcess, (PVOID)getProc,
-                                remoteParams, 0, 0, 1024 * 1024, 0, NULL);
-  if(NT_SUCCESS(status) && hThread)
-  {
-    WaitForSingleObject(hThread, INFINITE);
-    DWORD exitCode = 0;
-    GetExitCodeThread(hThread, &exitCode);
-    CloseHandle(hThread);
-
-    PVOID tmp = remoteName;
-    SIZE_T tmpSize = 0;
-    ntapi.FreeVirtualMemory(hProcess, &tmp, &tmpSize, MEM_RELEASE);
-    tmp = remoteParams;
-    tmpSize = 0;
-    ntapi.FreeVirtualMemory(hProcess, &tmp, &tmpSize, MEM_RELEASE);
-    return (uintptr_t)exitCode;
-  }
-
-  PVOID tmp = remoteName;
-  SIZE_T tmpSize = 0;
-  ntapi.FreeVirtualMemory(hProcess, &tmp, &tmpSize, MEM_RELEASE);
-  tmp = remoteParams;
-  tmpSize = 0;
-  ntapi.FreeVirtualMemory(hProcess, &tmp, &tmpSize, MEM_RELEASE);
-  return 0;
+  uintptr_t func = (uintptr_t)GetProcAddress(localModule, (const char *)(uintptr_t)ordinal);
+  FreeLibrary(localModule);
+  return func;
 }
 
 static bool ResolveImports(HANDLE hProcess, uintptr_t remoteImageBase,
@@ -370,8 +321,8 @@ static bool ResolveImports(HANDLE hProcess, uintptr_t remoteImageBase,
     for(size_t i = 0; i < len; i++)
       wDllName[i] = (wchar_t)(unsigned char)dllName[i];
 
-    uintptr_t remoteModule = RemoteLoadLibrary(hProcess, wDllName.c_str());
-    if(!remoteModule)
+    // Ensure the DLL is present in the target process.
+    if(!RemoteLoadLibrary(hProcess, wDllName.c_str()))
       return false;
 
     uintptr_t remoteOrigThunkAddr = remoteImageBase + (uintptr_t)pDesc->OriginalFirstThunk;
@@ -395,15 +346,14 @@ static bool ResolveImports(HANDLE hProcess, uintptr_t remoteImageBase,
       uintptr_t remoteFunc = 0;
       if(thunkData.u1.Ordinal & IMAGE_ORDINAL_FLAG64)
       {
-        remoteFunc = RemoteGetProcAddress(hProcess, remoteModule,
-                                          (const char *)(uintptr_t)(thunkData.u1.Ordinal & 0xFFFF));
+        remoteFunc = ResolveImportLocally(dllName, (WORD)(thunkData.u1.Ordinal & 0xFFFF));
       }
       else
       {
         char funcNameBuf[256] = {};
         uintptr_t nameAddr = remoteImageBase + (uintptr_t)thunkData.u1.AddressOfData + 2;
         if(ReadRemoteMem(hProcess, nameAddr, funcNameBuf, sizeof(funcNameBuf) - 1))
-          remoteFunc = RemoteGetProcAddress(hProcess, remoteModule, funcNameBuf);
+          remoteFunc = ResolveImportLocally(dllName, funcNameBuf);
       }
 
       if(!remoteFunc)
@@ -424,15 +374,14 @@ static bool ResolveImports(HANDLE hProcess, uintptr_t remoteImageBase,
       uintptr_t remoteFunc = 0;
       if(thunkData.u1.Ordinal & IMAGE_ORDINAL_FLAG32)
       {
-        remoteFunc = RemoteGetProcAddress(hProcess, remoteModule,
-                                          (const char *)(uintptr_t)(thunkData.u1.Ordinal & 0xFFFF));
+        remoteFunc = ResolveImportLocally(dllName, (WORD)(thunkData.u1.Ordinal & 0xFFFF));
       }
       else
       {
         char funcNameBuf[256] = {};
         uintptr_t nameAddr = remoteImageBase + (uintptr_t)thunkData.u1.AddressOfData + 2;
         if(ReadRemoteMem(hProcess, nameAddr, funcNameBuf, sizeof(funcNameBuf) - 1))
-          remoteFunc = RemoteGetProcAddress(hProcess, remoteModule, funcNameBuf);
+          remoteFunc = ResolveImportLocally(dllName, funcNameBuf);
       }
 
       if(!remoteFunc)
